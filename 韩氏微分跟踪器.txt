@@ -1,0 +1,121 @@
+
+#include <opencv2\opencv.hpp>
+#include <vector>  
+#include <algorithm> 
+#include <iostream>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+float r = 0;
+float h = 0;
+float T = 0;
+float x1 = 0;
+float x2 = 0;
+float u1 = 0;
+float u2 = 0;  //赋初值
+float u = 0;
+float shuzux1[999] = { 0 };
+float shuzux2[999] = { 0 };
+
+
+
+float sign(float y)
+{
+	if (y == 0)
+		return 0.5;
+	else if (y > 0)
+		return 1;
+	else
+		return 0;
+}
+
+float fst(float x1, float x2, float u)
+{
+	float y = 0;
+	float a0 = 0;
+	float a = 0;
+	float fhan = 0;
+	float d = 0;
+	float d0 = 0;
+
+
+	d = r*h;
+	d0 = h*d;
+	y = x1 - u + h*x2;
+	a0 = sqrt(d*d + 8 * r*fabs(y));
+
+	if (fabs(y)>d0)
+		a = x2 + 0.5*(a0 - d)*sign(y);
+	else
+		a = x2 + y / h;
+
+	if (fabs(a)>d)
+		fhan = -r*sign(a);
+	else
+		fhan = -r*a / d;
+
+	//测试一下************************************************************
+	printf("fhan=%f\n", fhan);
+
+	return(fhan);
+
+}
+
+float ADRC(float u, float T)             // v是控制系统的输入，y是控制系统的输出
+{
+
+	x1 = u1;
+	x2 = u2;
+
+
+	//**********   TD  ************
+	u1 = x1 + T*x2;
+	u2 = x2 + T*fst(x1, x2, u);
+
+	return x1, x2;
+}
+int main()
+{
+
+	float test[11] = { 1,2,3,4,8,16,32,64,128,64,32 };
+
+	printf("请输入滤波因子h：");
+	scanf_s("%f", &h);
+	printf("请输入速度因子r：");
+	scanf_s("%f", &r);
+	printf("请输入跟踪步长T：");
+	scanf_s("%f", &T);
+	int xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		ADRC(test[xunhuan], T);
+		shuzux1[xunhuan] = x1;
+		shuzux2[xunhuan] = x2;
+		xunhuan++;
+	}
+	xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		printf("x1=%f\n",shuzux1[xunhuan]);
+		xunhuan++;
+	}
+
+	printf("\n");
+
+	xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		printf("x2=%f\n", shuzux2[xunhuan]);
+		xunhuan++;
+	}
+
+
+
+
+	system("PAUSE");
+	return 0;
+}

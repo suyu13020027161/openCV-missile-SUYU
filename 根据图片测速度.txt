@@ -1,0 +1,80 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
+using namespace std;
+using namespace cv;
+
+#define SRC_WINDOW_NAME "redball"
+#define MID_WINDOWNAME "redball_gray"
+
+Mat srcImage, dstImage;
+Mat channel[3];
+
+int main()
+{
+	// 原图像读取
+
+	int a;
+	float zuobiao[2][2] = { 0 };
+	int shuzu = 0;
+	for (a = 1; a < 3; a++)
+	{
+		char c[16];
+		sprintf_s(c, "%d", a);
+
+		char x[40] = "F:\\\\";
+		char y[20] = ".png";
+		char s[20];
+		sprintf_s(s, "%s%s%s", x, c, y);
+		srcImage = imread(s, 1);
+
+
+
+
+
+
+		// 提取红色通道图像
+		int g_nHm = 9; // 可利用滑动条调节
+		split(srcImage, channel);
+		channel[0] = channel[0].mul(.1*g_nHm); // B    (mul: per-element matrix multiplication)
+		channel[1] = channel[1].mul(.1*g_nHm); // G
+		channel[2] = channel[2] - channel[0] - channel[1]; // R
+		channel[2] = 3 * channel[2];
+
+		dstImage = channel[2];
+		GaussianBlur(dstImage, dstImage, Size(9, 9), 2, 2); // 用于减少检测噪声
+
+															// 霍夫圆检测
+		vector<Vec3f> circles; // 3通道float型向量
+		HoughCircles(dstImage, circles, CV_HOUGH_GRADIENT, 1, srcImage.rows / 5, 200, 16, 0, 0);
+
+		// 结果显示
+		for (size_t i = 0; i < circles.size(); i++)
+		{
+			Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+			int radius = cvRound(circles[i][2]);
+
+			circle(srcImage, center, 3, Scalar(0, 255, 0), -1, 8, 0);
+			circle(srcImage, center, radius, Scalar(155, 50, 255), 3, 8, 0);
+			cout << circles[i][0] << "\t" << circles[i][1] << "\t" << circles[i][2] << endl;
+
+
+			zuobiao[shuzu][0] = circles[i][0];
+			zuobiao[shuzu][1] = circles[i][1];
+			shuzu++;
+
+		}
+		// cout << circles[0][0] << endl;
+
+		//不要图片时候删除这段
+		imshow(SRC_WINDOW_NAME, srcImage);
+		waitKey(0);
+
+	}
+	float distance1 = zuobiao[2][1] - zuobiao[0][1];
+	float distance2 = zuobiao[3][1] - zuobiao[1][1];
+	printf("distance1=%f\n", distance1);
+	printf("distance2=%f", distance2);
+	system("pause");
+	return 0;
+
+}

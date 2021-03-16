@@ -1,0 +1,870 @@
+#include <stdio.h>
+#include <opencv2\opencv.hpp>
+#include <vector>  
+#include <algorithm> 
+#include <iostream>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#define PI 3.1415926
+
+//这些参数是识别颜色RGB用的
+int Rmax;
+int Rmin;
+int Gmax;
+int Gmin;
+int Bmax;
+int Bmin;
+
+
+//这里我加上了统计坐标的数组，每个标记点的坐标都存在这些数组中，方便后人按需查阅
+float cex1[999] = { 0 };
+float cex2[999] = { 0 };
+float cey1[999] = { 0 };
+float cey2[999] = { 0 };
+float weix1[999] = { 0 };
+float weix2[999] = { 0 };
+float weiy1[999] = { 0 };
+float weiy2[999] = { 0 };
+
+
+//这几个数组后边加的，用来微分跟踪的
+float cex[999] = { 0 };
+float cey[999] = { 0 };
+float shuzux1[999] = { 0 };
+float shuzux2[999] = { 0 };
+float gengzongjuli[999][4] = { 0 };
+float gengzongsudu[999][4] = { 0 };
+float gengzongjiasudu[999][4] = { 0 };
+
+
+//这些是导弹运动参数
+float zuocha[999][3] = { 0 };
+float jiange;
+float sudu[999][3] = { 0 };
+float xingxing[999][2] = { 0 };
+float fuyangjiao[999] = { 0 };
+float zixuanjiao1 = 0;
+float zixuanjiao2 = 0;
+float zixuanjiao[999] = { 0 };
+float zixuanjiaosudu[999] = { 0 };
+float xzuobiao;
+float yzuobiao;
+float jiaodu;
+float jiasudu[999][3] = { 0 };
+float zixuanjiaojiasudu[999] = { 0 };
+
+
+//这些参数是计算比例尺用的
+float cebilichi;  //实际尺寸除图上尺寸
+float weibilichi;
+float cetu;
+float weitu;
+float cechicun;
+float weichicun;
+
+
+//这些参数用于微分跟踪
+float l = 0;  //滤波因子
+float h = 0;  //采样周期
+float v = 0;
+float gengzongx1 = 0;
+float gengzongx2 = 0;
+float gengzongu1 = 0;
+float gengzongu2 = 0;  //赋初值
+
+//预测参数
+float yuce = 0;
+int yucebushu = 0;
+
+using namespace cv;
+using namespace std;
+
+
+//这部分是微分跟踪函数
+float u(float gengzongx1, float gengzongx2, float v, float l, float h)
+{
+	float uk = 0;
+	uk = -(gengzongx1 - v + 1.5*l*h*gengzongx2) / (l*l*h*h);
+	return uk;
+}
+
+//这部分是微分跟踪函数
+float ADRC(float v, float l, float h)             // v是控制系统的输入，y是控制系统的输出
+{
+
+	gengzongx1 = gengzongu1;
+	gengzongx2 = gengzongu2;
+
+
+	//**********   TD  ************
+	gengzongu1 = gengzongx1 + h*gengzongx2 + 0.5*h*h*u(gengzongx1, gengzongx2, v, l, h);
+	gengzongu2 = gengzongx2 + h*u(gengzongx1, gengzongx2, v, l, h);
+
+	return gengzongx1, gengzongx2;
+}
+
+
+//这部分是自旋检测必要函数
+void RGB2HSV(double red, double green, double blue, double& hue, double& saturation, double& intensity)
+{
+
+	double r, g, b;
+	double h, s, i;
+
+	double sum;
+	double minRGB, maxRGB;
+	double theta;
+
+	r = red / 255.0;
+	g = green / 255.0;
+	b = blue / 255.0;
+
+	minRGB = ((r<g) ? (r) : (g));
+	minRGB = (minRGB<b) ? (minRGB) : (b);
+
+	maxRGB = ((r>g) ? (r) : (g));
+	maxRGB = (maxRGB>b) ? (maxRGB) : (b);
+
+	sum = r + g + b;
+	i = sum / 3.0;
+
+	if (i<0.001 || maxRGB - minRGB<0.001)
+	{
+		h = 0.0;
+		s = 0.0;
+	}
+	else
+	{
+		s = 1.0 - 3.0*minRGB / sum;
+		theta = sqrt((r - g)*(r - g) + (r - b)*(g - b));
+		theta = acos((r - g + r - b)*0.5 / theta);
+		if (b <= g)
+			h = theta;
+		else
+			h = 2 * PI - theta;
+		if (s <= 0.01)
+			h = 0;
+	}
+
+	hue = (int)(h * 180 / PI);
+	saturation = (int)(s * 100);
+	intensity = (int)(i * 100);
+}
+
+Mat picture_red(Mat input)
+{
+
+	Mat frame;
+	Mat srcImg = input;
+	frame = srcImg;
+	waitKey(1);
+	int width = srcImg.cols;
+	int height = srcImg.rows;
+
+	int x, y;
+	double B = 0.0, G = 0.0, R = 0.0, H = 0.0, S = 0.0, V = 0.0;
+	Mat vec_rgb = Mat::zeros(srcImg.size(), CV_8UC1);
+	for (x = 0; x < height; x++)
+	{
+		for (y = 0; y < width; y++)
+		{
+			B = srcImg.at<Vec3b>(x, y)[0];
+			G = srcImg.at<Vec3b>(x, y)[1];
+			R = srcImg.at<Vec3b>(x, y)[2];
+
+
+			//红色范围，范围参考的网上。可以自己调
+			if ((R >= Rmin && R <= Rmax) && (G >= Gmin && G <= Gmax) && (B >= Bmin && B <= Bmax))
+				vec_rgb.at<uchar>(x, y) = 255;
+			/*cout << H << "," << S << "," << V << endl;*/
+		}
+	}
+	/*imshow("hsv", vec_rgb);*/
+	return vec_rgb;
+
+
+}
+
+void O_x1y1(Mat in, double *x1, double *y1, double *x2, double *y2)
+
+{
+	Mat matSrc = in;
+	/*Mat matSrc = imread("qwer9.png", 0);*/
+
+	GaussianBlur(matSrc, matSrc, Size(5, 5), 0);//高斯滤波，除噪点
+
+	vector<vector<Point> > contours;//contours的类型，双重的vector
+
+	vector<Vec4i> hierarchy;//Vec4i是指每一个vector元素中有四个int型数据。
+
+							//阈值
+
+	threshold(matSrc, matSrc, 100, 255, THRESH_BINARY);//图像二值化
+
+
+
+	findContours(matSrc.clone(), contours, hierarchy, CV_RETR_EXTERNAL, CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	/// 计算矩
+
+	vector<Moments> mu(contours.size());
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		mu[i] = moments(contours[i], false);
+
+	}
+
+	///  计算矩中心:
+
+	vector<Point2f> mc(contours.size());
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		mc[i] = Point2f(mu[i].m10 / mu[i].m00, mu[i].m01 / mu[i].m00);
+
+	}
+
+	// 绘制轮廓
+
+	Mat drawing = Mat::zeros(matSrc.size(), CV_8UC1);
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		Scalar color = Scalar(255);
+
+		//drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());//绘制轮廓函数
+
+		circle(drawing, mc[i], 4, color, -1, 8, 0);
+
+
+	}
+	*x1 = mc[0].x;
+	*y1 = mc[0].y;
+	*x2 = mc[contours.size() - 1].x;
+	*y2 = mc[contours.size() - 1].y;
+
+	imshow("outImage", drawing);
+
+}
+
+
+
+Mat toBinary(Mat src);
+bool ascendSort(vector<Point> a, vector<Point> b);
+Mat getContour(Mat src, Mat binary);
+
+Mat srcImage, binaryImage, contourImage;
+
+
+//这部分是侧面拍照用函数
+Mat toBinary(Mat src)
+{
+	Mat temp = src.clone();
+	int thresh = 110, maxValue = 254;
+	cvtColor(temp, temp, CV_BGR2GRAY);//convert to gray image
+	threshold(temp, temp, thresh, maxValue, THRESH_BINARY);//binary processing
+	return temp;
+}
+
+bool ascendSort(vector<Point> a, vector<Point> b)
+{
+	return a.size() > b.size();
+}
+
+Mat getContour(Mat src, Mat binary)
+{
+	Mat temp = src.clone();
+	vector< vector< Point> > contours;//save all contours data
+	vector<Vec4i> hierarchy;
+	findContours(binary, contours, hierarchy, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);//find contours
+	sort(contours.begin(), contours.end(), ascendSort);//ascending sort
+	vector< vector<Point> >::iterator itc = contours.begin(); //iterator of contour vector
+	int i = 0;
+	while (itc != contours.end())
+	{
+		if (itc->size() > 150)//ignore the small object
+		{
+			if (i>0)
+			{
+				Rect rect = boundingRect(*itc);//get the rectangle bounding
+				rectangle(temp, rect, { 0, 0, 255 }, 2, 8);//draw the rectangle
+				RotatedRect resultRect;
+				resultRect = minAreaRect(*itc);//get the min area rectangle   
+				Point2f pt[4];
+				resultRect.points(pt);//get the coordinate of vertex
+									  //draw the min area rectangle
+				line(temp, pt[0], pt[1], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[1], pt[2], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[2], pt[3], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[3], pt[0], Scalar(255, 0, 0), 2, 8);
+
+				cout << "X坐标：" << resultRect.center.x << " Y坐标：" << resultRect.center.y << " 偏转角度：" << resultRect.angle << "°" << endl;
+				xzuobiao = resultRect.center.x;
+				yzuobiao = resultRect.center.y;
+				jiaodu = resultRect.angle;
+
+
+			}
+			i++;
+		}
+		++itc;
+	}
+
+	return temp;
+
+}
+
+int main()
+{
+
+
+	int caiyang;
+	printf("请输入采样次数（请输入不小于3的整数）：");
+	scanf_s("%d", &caiyang);
+	printf("请输入采样时间间隔（秒）：");
+	scanf_s("%f", &jiange);
+	printf("请输入弹体侧面两个标记点的实际圆心距离(程序将自动计算比例尺）：");
+	scanf_s("%f", &cechicun);
+	printf("请输入弹体尾部两个标记点的实际圆心距离(程序将自动计算比例尺）：");
+	scanf_s("%f", &weichicun);
+	getchar();
+	char lujing[100] = "";
+	printf("请输入照片存储路径：");
+	fgets(lujing, sizeof(lujing), stdin);
+	if (lujing[strlen(lujing) - 1] == '\n')
+		lujing[strlen(lujing) - 1] = '\0';
+	//***************************************************************************************************************
+	printf("请查阅RGB色彩卡，确认标记的RGB范围！\n");
+	printf("请输入Rmin值（整数）：");
+	scanf_s("%d", &Rmin);
+	printf("请输入Rmax值（整数）：");
+	scanf_s("%d", &Rmax);
+	printf("请输入Gmin值（整数）：");
+	scanf_s("%d", &Gmin);
+	printf("请输入Gmax值（整数）：");
+	scanf_s("%d", &Gmax);
+	printf("请输入Bmin值（整数）：");
+	scanf_s("%d", &Bmin);
+	printf("请输入Bmax值（整数）：");
+	scanf_s("%d", &Bmax);
+
+	printf("请输入滤波因子l：");
+	scanf_s("%f", &l);
+	printf("请输入采样周期h：");
+	scanf_s("%f", &h);
+
+
+
+
+	printf_s("\n");
+	int xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+
+		char zhong[16];
+		sprintf_s(zhong, "%d", xunhuan);
+		char wei[20] = ".jpg";
+		char s[20];
+		//*********************************************************
+		sprintf_s(s, "%s%s%s", lujing, zhong, wei);
+		double xx1, yy1, xx2, yy2;
+		double x1, y1, x2, y2;
+		Mat matSrc = imread(s, 1);
+		Mat middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+
+		//将侧面标记点的坐标存入之前建好数组中，方便后人查阅
+		cex1[xunhuan] = xx1;
+		cey1[xunhuan] = yy1;
+		cex2[xunhuan] = xx2;
+		cey2[xunhuan] = yy2;
+		cex[xunhuan] = ((xx1 + xx2)*cebilichi) / 2;
+		cey[xunhuan] = ((yy1 + yy2)*cebilichi) / 2;
+
+		//这里开始自动计算比例尺,注意因为第一张照片弹体无位移，以第一张照片为准计算比例尺
+		cetu = sqrt((cex1[0] - cex2[0])*(cex1[0] - cex2[0]) + (cey1[0] - cey2[0])*(cey1[0] - cey2[0]));  //图上两标记点间距尺寸
+		cebilichi = cechicun / cetu;
+
+		xingxing[xunhuan][0] = (x1 + x2) / 2;
+		xingxing[xunhuan][1] = (y1 + y2) / 2;
+		imshow("原图", matSrc);
+		imshow("red", picture_red(matSrc));
+		double yyi = 0;
+		double xyi = 0;
+		yyi = y2 - y1;
+		xyi = x2 - x1;
+		if (xyi != 0)
+		{
+			fuyangjiao[xunhuan] = atan(yyi / xyi)*(180 / PI);
+		}
+		else
+		{
+			fuyangjiao[xunhuan] = 90;
+		}
+		//这部分是第二张照片俯仰的
+		sprintf_s(zhong, "%d", xunhuan + 1);
+		sprintf_s(s, "%s%s%s", lujing, zhong, wei);
+		matSrc = imread(s, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+
+		//将侧面标记点的坐标存入之前建好数组中，方便后人查阅
+		cex1[xunhuan + 1] = xx1;
+		cey1[xunhuan + 1] = yy1;
+		cex2[xunhuan + 1] = xx2;
+		cey2[xunhuan + 1] = yy2;
+		cex[xunhuan + 1] = ((xx1 + xx2)*cebilichi) / 2;
+		cey[xunhuan + 1] = ((yy1 + yy2)*cebilichi) / 2;
+
+
+
+		xingxing[xunhuan + 1][0] = (x1 + x2) / 2;
+		xingxing[xunhuan + 1][1] = (y1 + y2) / 2;
+		imshow("原图", matSrc);
+		imshow("red", picture_red(matSrc));
+		double yer = 0;
+		double xer = 0;
+		yer = y2 - y1;
+		xer = x2 - x1;
+		if (xer != 0)
+		{
+			fuyangjiao[xunhuan + 1] = atan(yer / xer)*(180 / PI);
+		}
+		else
+		{
+			fuyangjiao[xunhuan + 1] = 90;
+		}
+
+		zuocha[xunhuan][0] = fabs(xingxing[xunhuan + 1][0] - xingxing[xunhuan][0])*cebilichi;
+		zuocha[xunhuan][1] = fabs(xingxing[xunhuan + 1][1] - xingxing[xunhuan][1])*cebilichi;
+		zuocha[xunhuan][2] = fabs(fuyangjiao[xunhuan + 1] - fuyangjiao[xunhuan]);
+
+
+
+		//******************************************************
+		sudu[xunhuan][0] = zuocha[xunhuan][0] / jiange;
+		sudu[xunhuan][1] = zuocha[xunhuan][1] / jiange;
+		sudu[xunhuan][2] = zuocha[xunhuan][2] / jiange;
+
+
+
+		//这部分是自旋的
+		char zixuanzhong[16];
+		sprintf_s(zixuanzhong, "%d", xunhuan);
+		char zixuanwei[20] = "r.jpg";
+		char zixuans[20];
+		sprintf_s(zixuans, "%s%s%s", lujing, zixuanzhong, zixuanwei);
+		matSrc = imread(zixuans, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+
+		//将尾部标记点的坐标存入之前建好数组中，方便后人查阅
+		weix1[xunhuan] = xx1;
+		weiy1[xunhuan] = yy1;
+		weix2[xunhuan] = xx2;
+		weiy2[xunhuan] = yy2;
+
+		//这里开始自动计算比例尺,注意因为第一张照片弹体无位移，以第一张照片为准计算比例尺
+		weitu = sqrt((weix1[0] - weix2[0])*(weix1[0] - weix2[0]) + (weiy1[0] - weiy2[0])*(weiy1[0] - weiy2[0]));  //图上两标记点间距尺寸
+		weibilichi = weichicun / weitu;
+
+		imshow("原图r", matSrc);
+		imshow("redr", picture_red(matSrc));
+
+		yyi = 0;
+		xyi = 0;
+		yyi = y2 - y1;
+		xyi = x2 - x1;
+		if (xyi != 0)
+		{
+			zixuanjiao[xunhuan] = atan(yyi / xyi)*(180 / PI);
+		}
+		else
+		{
+			zixuanjiao[xunhuan] = 90;
+		}
+		//这部分是第二张照片自旋的
+		sprintf_s(zixuanzhong, "%d", xunhuan + 1);
+		sprintf_s(zixuans, "%s%s%s", lujing, zixuanzhong, zixuanwei);
+		matSrc = imread(zixuans, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+
+		//将尾部标记点的坐标存入之前建好数组中，方便后人查阅
+		weix1[xunhuan + 1] = xx1;
+		weiy1[xunhuan + 1] = yy1;
+		weix2[xunhuan + 1] = xx2;
+		weiy2[xunhuan + 1] = yy2;
+
+		imshow("原图r", matSrc);
+		imshow("redr", picture_red(matSrc));
+
+		yer = 0;
+		xer = 0;
+		yer = y2 - y1;
+		xer = x2 - x1;
+		if (xer != 0)
+		{
+			zixuanjiao[xunhuan+1] = atan(yer / xer)*(180 / PI);
+		}
+		else
+		{
+			zixuanjiao[xunhuan + 1] = 90;
+		}	
+		zixuanjiaosudu[xunhuan] = (zixuanjiao[xunhuan+1]- zixuanjiao[xunhuan]) / jiange;
+
+
+		xunhuan = xunhuan + 1;
+	}
+
+	//这部分是微分跟踪
+	xunhuan = 0;
+	while (xunhuan < caiyang)
+	{
+		ADRC(cex[xunhuan], l, h);
+		gengzongjuli[xunhuan][0] = gengzongx1;
+		gengzongsudu[xunhuan][0] = gengzongx2;
+
+		ADRC(cey[xunhuan], l, h);
+		gengzongjuli[xunhuan][1] = gengzongx1;
+		gengzongsudu[xunhuan][1] = gengzongx2;
+
+		ADRC(fuyangjiao[xunhuan], l, h);
+		gengzongjuli[xunhuan][2] = gengzongx1;
+		gengzongsudu[xunhuan][2] = gengzongx2;
+
+		ADRC(zixuanjiao[xunhuan], l, h);
+		gengzongjuli[xunhuan][3] = gengzongx1;
+		gengzongsudu[xunhuan][3] = gengzongx2;
+
+		xunhuan++;
+	}
+
+
+
+	//这部分计算加速度
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 2))
+	{
+		jiasudu[xunhuan][0] = (sudu[xunhuan + 1][0] - sudu[xunhuan][0]) / jiange;
+		jiasudu[xunhuan][1] = (sudu[xunhuan + 1][1] - sudu[xunhuan][1]) / jiange;
+		jiasudu[xunhuan][2] = (sudu[xunhuan + 1][2] - sudu[xunhuan][2]) / jiange;
+		zixuanjiaojiasudu[xunhuan] = (zixuanjiaosudu[xunhuan + 1] - zixuanjiaosudu[xunhuan]) / jiange;
+		xunhuan++;
+	}
+
+
+	//这部分计算微分跟踪的加速度
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		gengzongjiasudu[xunhuan][0] = (gengzongsudu[xunhuan + 1][0] - gengzongsudu[xunhuan][0]) / jiange;
+		gengzongjiasudu[xunhuan][1] = (gengzongsudu[xunhuan + 1][1] - gengzongsudu[xunhuan][1]) / jiange;
+		gengzongjiasudu[xunhuan][2] = (gengzongsudu[xunhuan + 1][2] - gengzongsudu[xunhuan][2]) / jiange;
+		gengzongjiasudu[xunhuan][3] = (gengzongsudu[xunhuan + 1][3] - gengzongsudu[xunhuan][3]) / jiange;
+		xunhuan++;
+	}
+
+
+
+	//这部分输出弹体速度
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组重心x方向速度为：%.1fm/s\n", xunhuan + 1, sudu[xunhuan][0]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组重心y方向速度为：%.1fm/s\n", xunhuan + 1, sudu[xunhuan][1]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组俯仰角速度为：%.1f°/s\n", xunhuan + 1, sudu[xunhuan][2]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组自旋角速度为：%.1f°/s\n", xunhuan + 1, zixuanjiaosudu[xunhuan]);
+		xunhuan++;
+	}
+	printf_s("\n");
+
+
+
+
+
+
+	//这部分输出弹体加速度
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 2))
+	{
+		printf_s("第%d组重心x方向加速度为：%.1fm/s^2\n", xunhuan + 1, jiasudu[xunhuan][0]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 2))
+	{
+		printf_s("第%d组重心y方向加速度为：%.1fm/s^2\n", xunhuan + 1, jiasudu[xunhuan][1]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 2))
+	{
+		printf_s("第%d组俯仰角加速度为：%.1f°/s^2\n", xunhuan + 1, jiasudu[xunhuan][2]);
+		xunhuan++;
+	}
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 2))
+	{
+		printf_s("第%d组自旋角加速度为：%.1f°/s^2\n", xunhuan + 1, zixuanjiaojiasudu[xunhuan]);
+		xunhuan++;
+	}
+	printf_s("\n");
+
+
+
+	//这部分输出跟踪弹体坐标
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组重心x方向跟踪坐标为：%.1fm\n", xunhuan + 1, gengzongjuli[xunhuan][0]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组重心y方向跟踪坐标为：%.1fm\n", xunhuan + 1, gengzongjuli[xunhuan][1]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组俯仰角为：%.1f°\n", xunhuan + 1, gengzongjuli[xunhuan][2]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组滚转角为：%.1f°\n", xunhuan + 1, gengzongjuli[xunhuan][3]);
+		xunhuan++;
+	}
+
+
+	//这部分输出跟踪弹体速度
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组重心x方向跟踪速度为：%.1fm/s\n", xunhuan + 1, gengzongsudu[xunhuan][0]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组重心y方向跟踪速度为：%.1fm/s\n", xunhuan + 1, gengzongsudu[xunhuan][1]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组俯仰跟踪角速度为：%.1f°/s\n", xunhuan + 1, gengzongsudu[xunhuan][2]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang))
+	{
+		printf_s("第%d组滚转跟踪角速度为：%.1f°/s\n", xunhuan + 1, gengzongsudu[xunhuan][3]);
+		xunhuan++;
+	}
+
+	//这部分输出跟踪弹体加速度
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang-1))
+	{
+		printf_s("第%d组重心x方向跟踪加速度为：%.1fm/s^2\n", xunhuan + 1, gengzongjiasudu[xunhuan][0]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组重心y方向跟踪加速度为：%.1fm/s^2\n", xunhuan + 1, gengzongjiasudu[xunhuan][1]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组俯仰跟踪角加速度为：%.1f°/s^2\n", xunhuan + 1, gengzongjiasudu[xunhuan][2]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+		printf_s("第%d组滚转跟踪角加速度为：%.1f°/s^2\n", xunhuan + 1, gengzongjiasudu[xunhuan][3]);
+		xunhuan++;
+	}
+
+    //预测未来动向
+	printf_s("\n");
+	printf("请输入要预测未来几秒：");
+	scanf_s("%f", &yuce);
+	yucebushu = yuce / jiange;
+
+	//这部分计算常规方法预测未来动向
+	xunhuan = 0;
+	while (xunhuan < yucebushu)
+	{
+		sudu[caiyang - 1 + xunhuan][0] = sudu[caiyang - 2 + xunhuan][0] + jiange*jiasudu[caiyang - 3][0];
+		sudu[caiyang - 1 + xunhuan][1] = sudu[caiyang - 2 + xunhuan][1] + jiange*jiasudu[caiyang - 3][1];
+		sudu[caiyang - 1 + xunhuan][2] = sudu[caiyang - 2 + xunhuan][2] + jiange*jiasudu[caiyang - 3][2];
+		zixuanjiaosudu[caiyang - 1 + xunhuan] = zixuanjiaosudu[caiyang - 2 + xunhuan] + jiange*zixuanjiaojiasudu[caiyang - 3];
+		xunhuan++;
+	}
+
+	//这部分计算微分跟踪方法预测未来动向
+	xunhuan = 0;
+	while (xunhuan < yucebushu)
+	{
+		gengzongsudu[caiyang + xunhuan][0] = gengzongsudu[caiyang - 1 + xunhuan][0] + jiange*gengzongjiasudu[caiyang - 2][0];
+		gengzongsudu[caiyang + xunhuan][1] = gengzongsudu[caiyang - 1 + xunhuan][1] + jiange*gengzongjiasudu[caiyang - 2][1];
+		gengzongsudu[caiyang + xunhuan][2] = gengzongsudu[caiyang - 1 + xunhuan][2] + jiange*gengzongjiasudu[caiyang - 2][2];
+		gengzongsudu[caiyang + xunhuan][3] = gengzongsudu[caiyang - 1 + xunhuan][3] + jiange*gengzongjiasudu[caiyang - 2][3];
+		xunhuan++;
+	}
+
+	//这部分输出常规方法预测结果
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组重心x方向预测速度为：%.1fm/s\n", caiyang + xunhuan, sudu[caiyang - 1 + xunhuan][0]);
+
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组重心y方向预测速度为：%.1fm/s\n", caiyang + xunhuan, sudu[caiyang - 1 + xunhuan][1]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组俯仰预测角速度为：%.1f°/s\n", caiyang + xunhuan, sudu[caiyang - 1 + xunhuan][2]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组自旋预测角速度为：%.1f°/s\n", caiyang + xunhuan, zixuanjiaosudu[caiyang - 1 + xunhuan]);
+		xunhuan++;
+	}
+	printf_s("\n");
+
+	//这部分输出微分跟踪预测结果
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组重心x方向跟踪预测速度为：%.1fm/s\n", caiyang + xunhuan + 1, gengzongsudu[caiyang + xunhuan][0]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组重心y方向跟踪预测速度为：%.1fm/s\n", caiyang + xunhuan + 1, gengzongsudu[caiyang + xunhuan][1]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组俯仰跟踪预测角速度为：%.1f°/s\n", caiyang + xunhuan + 1, gengzongsudu[caiyang + xunhuan][2]);
+		xunhuan++;
+	}
+
+	printf_s("\n");
+	xunhuan = 0;
+	while (xunhuan < (yucebushu))
+	{
+		printf_s("第%d组滚转跟踪预测角速度为：%.1f°/s\n", caiyang + xunhuan + 1, gengzongsudu[caiyang + xunhuan][3]);
+		xunhuan++;
+	}
+
+
+	waitKey(0);
+	system("PAUSE");
+	return 0;
+
+}
+
+

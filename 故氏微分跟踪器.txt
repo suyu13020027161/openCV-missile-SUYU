@@ -1,0 +1,86 @@
+
+#include <opencv2\opencv.hpp>
+#include <vector>  
+#include <algorithm> 
+#include <iostream>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+float l = 0;
+float h = 0;
+float v = 0;
+float gengzongx1 = 0;
+float gengzongx2 = 0;
+float gengzongu1 = 0;
+float gengzongu2 = 0;  //赋初值
+
+float shuzux1[999] = { 0 };
+float shuzux2[999] = { 0 };
+
+
+
+float u(float gengzongx1, float gengzongx2, float v, float l, float h)
+{
+	float uk = 0;
+	uk = -(gengzongx1 - v + 1.5*l*h*gengzongx2)/(l*l*h*h);
+	return uk;
+}
+
+
+float ADRC(float v, float l, float h)             // v是控制系统的输入，y是控制系统的输出
+{
+
+	gengzongx1 = gengzongu1;
+	gengzongx2 = gengzongu2;
+
+
+	//**********   TD  ************
+	gengzongu1 = gengzongx1 + h*gengzongx2+0.5*h*h*u(gengzongx1,gengzongx2,v,l,h);
+	gengzongu2 = gengzongx2 + h*u(gengzongx1, gengzongx2, v, l, h);
+
+	return gengzongx1, gengzongx2;
+}
+int main()
+{
+
+	float test[11] = { 1,2,3,4,5,6,7,8,9,10,11 };
+
+	printf("请输入滤波因子l：");
+	scanf_s("%f", &l);
+
+	printf("请输入采样周期h：");
+	scanf_s("%f", &h);
+	int xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		ADRC(test[xunhuan], l,h);
+		shuzux1[xunhuan] = x1;
+		shuzux2[xunhuan] = x2;
+		xunhuan++;
+	}
+	xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		printf("x1=%f\n",shuzux1[xunhuan]);
+		xunhuan++;
+	}
+
+	printf("\n");
+
+	xunhuan = 0;
+	while (xunhuan < 11)
+	{
+		printf("x2=%f\n", shuzux2[xunhuan]);
+		xunhuan++;
+	}
+
+
+
+
+	system("PAUSE");
+	return 0;
+}

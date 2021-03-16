@@ -1,0 +1,48 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
+using namespace std;
+using namespace cv;
+
+#define SRC_WINDOW_NAME "redball"
+#define MID_WINDOWNAME "redball_gray"
+
+Mat srcImage, dstImage;
+Mat channel[3];
+
+int main()
+{
+	// 原图像读取
+	srcImage = imread("F:\\5.jpg", 1);
+	
+
+	// 提取红色通道图像
+	int g_nHm = 9; // 可利用滑动条调节
+	split(srcImage, channel);
+	channel[0] = channel[0].mul(.1*g_nHm); // B    (mul: per-element matrix multiplication)
+	channel[1] = channel[1].mul(.1*g_nHm); // G
+	channel[2] = channel[2] - channel[0] - channel[1]; // R
+	channel[2] = 3 * channel[2];
+	
+	dstImage = channel[2];
+	GaussianBlur(dstImage, dstImage, Size(9, 9), 2, 2); // 用于减少检测噪声
+
+														// 霍夫圆检测
+	vector<Vec3f> circles; // 3通道float型向量
+	HoughCircles(dstImage, circles, CV_HOUGH_GRADIENT, 1, srcImage.rows / 5, 200, 16, 0, 0);
+
+	// 结果显示
+	for (size_t i = 0; i < circles.size(); i++)
+	{
+		Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+		int radius = cvRound(circles[i][2]);
+
+		circle(srcImage, center, 3, Scalar(0, 255, 0), -1, 8, 0);
+		circle(srcImage, center, radius, Scalar(155, 50, 255), 3, 8, 0);
+		cout << circles[i][0] << "\t" << circles[i][1] << "\t" << circles[i][2] << endl;
+	}
+	// cout << circles[0][0] << endl;
+	imshow(SRC_WINDOW_NAME, srcImage);
+	waitKey(0);
+
+	return 0;
+}

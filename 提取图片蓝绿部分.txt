@@ -1,0 +1,33 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
+using namespace std;
+using namespace cv;
+
+#define SRC_WINDOW_NAME "redball"
+#define MID_WINDOWNAME "redball_gray"
+
+Mat srcImage, dstImage;
+Mat channel[3];
+int main()
+{
+	Mat g_srcImage = imread("F://test.png");
+	Mat g_dst1;
+	Mat g_dst2;
+	Mat g_dst;
+	Mat hsv = Mat::zeros(g_srcImage.cols, g_srcImage.rows, CV_8UC3);
+	// 高斯模糊   
+	GaussianBlur(g_srcImage, g_srcImage, Size(3, 3), 0, 0);
+	// 转换为HSV，hue色度，saturation饱和度，value纯度   
+	cvtColor(g_srcImage, hsv, CV_BGR2HSV);
+	//通过HSV范围定量进行颜色的检测
+	inRange(hsv, Scalar(33, 43, 46), Scalar(77, 255, 255), g_dst1);
+	inRange(hsv, Scalar(100, 43, 46), Scalar(124, 255, 255), g_dst2);
+	//Mat mask=inRange(hsv,lower_yellow,upper_yellow);
+
+
+
+	imshow("2", g_dst1);
+	imshow("3", g_dst2);
+	waitKey();
+	return 0;
+}

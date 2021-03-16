@@ -1,0 +1,437 @@
+#include <stdio.h>
+#include <opencv2\opencv.hpp>
+#include <vector>  
+#include <algorithm> 
+#include <iostream>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#define PI 3.1415926
+
+float zixuanjiao1 = 0;
+float zixuanjiao2 = 0;
+float zixuanjiao[999] = { 0 };
+float zixuanjiaosudu[999] = { 0 };
+float xzuobiao;
+float yzuobiao;
+float jiaodu;
+float zuobiao[999][3] = { 0 };
+float zuocha[999][3] = { 0 };
+float jiange;
+float sudu[999][3] = { 0 };
+float bilichi;
+float xingxing[999][2] = { 0 };
+float fuyangjiao[999] = { 0 };
+
+
+
+using namespace cv;
+using namespace std;
+
+//这部分是自旋检测必要函数
+void RGB2HSV(double red, double green, double blue, double& hue, double& saturation, double& intensity)
+{
+
+	double r, g, b;
+	double h, s, i;
+
+	double sum;
+	double minRGB, maxRGB;
+	double theta;
+
+	r = red / 255.0;
+	g = green / 255.0;
+	b = blue / 255.0;
+
+	minRGB = ((r<g) ? (r) : (g));
+	minRGB = (minRGB<b) ? (minRGB) : (b);
+
+	maxRGB = ((r>g) ? (r) : (g));
+	maxRGB = (maxRGB>b) ? (maxRGB) : (b);
+
+	sum = r + g + b;
+	i = sum / 3.0;
+
+	if (i<0.001 || maxRGB - minRGB<0.001)
+	{
+		h = 0.0;
+		s = 0.0;
+	}
+	else
+	{
+		s = 1.0 - 3.0*minRGB / sum;
+		theta = sqrt((r - g)*(r - g) + (r - b)*(g - b));
+		theta = acos((r - g + r - b)*0.5 / theta);
+		if (b <= g)
+			h = theta;
+		else
+			h = 2 * PI - theta;
+		if (s <= 0.01)
+			h = 0;
+	}
+
+	hue = (int)(h * 180 / PI);
+	saturation = (int)(s * 100);
+	intensity = (int)(i * 100);
+}
+
+Mat picture_red(Mat input)
+{
+
+	Mat frame;
+	Mat srcImg = input;
+	frame = srcImg;
+	waitKey(1);
+	int width = srcImg.cols;
+	int height = srcImg.rows;
+
+	int x, y;
+	double B = 0.0, G = 0.0, R = 0.0, H = 0.0, S = 0.0, V = 0.0;
+	Mat vec_rgb = Mat::zeros(srcImg.size(), CV_8UC1);
+	for (x = 0; x < height; x++)
+	{
+		for (y = 0; y < width; y++)
+		{
+			B = srcImg.at<Vec3b>(x, y)[0];
+			G = srcImg.at<Vec3b>(x, y)[1];
+			R = srcImg.at<Vec3b>(x, y)[2];
+			RGB2HSV(R, G, B, H, S, V);
+			//红色范围，范围参考的网上。可以自己调
+			if ((H >= 312 && H <= 360) && (S >= 17 && S <= 100) && (V>18 && V < 100))
+				vec_rgb.at<uchar>(x, y) = 255;
+			/*cout << H << "," << S << "," << V << endl;*/
+		}
+	}
+	/*imshow("hsv", vec_rgb);*/
+	return vec_rgb;
+
+
+}
+
+void O_x1y1(Mat in, double *x1, double *y1, double *x2, double *y2)
+
+{
+	Mat matSrc = in;
+	/*Mat matSrc = imread("qwer9.png", 0);*/
+
+	GaussianBlur(matSrc, matSrc, Size(5, 5), 0);//高斯滤波，除噪点
+
+	vector<vector<Point> > contours;//contours的类型，双重的vector
+
+	vector<Vec4i> hierarchy;//Vec4i是指每一个vector元素中有四个int型数据。
+
+							//阈值
+
+	threshold(matSrc, matSrc, 100, 255, THRESH_BINARY);//图像二值化
+
+
+
+	findContours(matSrc.clone(), contours, hierarchy, CV_RETR_EXTERNAL, CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	/// 计算矩
+
+	vector<Moments> mu(contours.size());
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		mu[i] = moments(contours[i], false);
+
+	}
+
+	///  计算矩中心:
+
+	vector<Point2f> mc(contours.size());
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		mc[i] = Point2f(mu[i].m10 / mu[i].m00, mu[i].m01 / mu[i].m00);
+
+	}
+
+	/// 绘制轮廓
+
+	Mat drawing = Mat::zeros(matSrc.size(), CV_8UC1);
+
+	for (int i = 0; i < contours.size(); i++)
+
+	{
+
+		Scalar color = Scalar(255);
+
+		//drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());//绘制轮廓函数
+
+		circle(drawing, mc[i], 4, color, -1, 8, 0);
+
+
+	}
+	*x1 = mc[0].x;
+	*y1 = mc[0].y;
+	*x2 = mc[contours.size() - 1].x;
+	*y2 = mc[contours.size() - 1].y;
+
+	imshow("outImage", drawing);
+
+}
+
+
+
+Mat toBinary(Mat src);
+bool ascendSort(vector<Point> a, vector<Point> b);
+Mat getContour(Mat src, Mat binary);
+
+Mat srcImage, binaryImage, contourImage;
+
+
+//这部分是侧面拍照用函数
+Mat toBinary(Mat src)
+{
+	Mat temp = src.clone();
+	int thresh = 110, maxValue = 254;
+	cvtColor(temp, temp, CV_BGR2GRAY);//convert to gray image
+	threshold(temp, temp, thresh, maxValue, THRESH_BINARY);//binary processing
+	return temp;
+}
+
+bool ascendSort(vector<Point> a, vector<Point> b)
+{
+	return a.size() > b.size();
+}
+
+Mat getContour(Mat src, Mat binary)
+{
+	Mat temp = src.clone();
+	vector< vector< Point> > contours;//save all contours data
+	vector<Vec4i> hierarchy;
+	findContours(binary, contours, hierarchy, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);//find contours
+	sort(contours.begin(), contours.end(), ascendSort);//ascending sort
+	vector< vector<Point> >::iterator itc = contours.begin(); //iterator of contour vector
+	int i = 0;
+	while (itc != contours.end())
+	{
+		if (itc->size() > 150)//ignore the small object
+		{
+			if (i>0)
+			{
+				Rect rect = boundingRect(*itc);//get the rectangle bounding
+				rectangle(temp, rect, { 0, 0, 255 }, 2, 8);//draw the rectangle
+				RotatedRect resultRect;
+				resultRect = minAreaRect(*itc);//get the min area rectangle   
+				Point2f pt[4];
+				resultRect.points(pt);//get the coordinate of vertex
+									  //draw the min area rectangle
+				line(temp, pt[0], pt[1], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[1], pt[2], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[2], pt[3], Scalar(255, 0, 0), 2, 8);
+				line(temp, pt[3], pt[0], Scalar(255, 0, 0), 2, 8);
+
+				cout << "X坐标：" << resultRect.center.x << " Y坐标：" << resultRect.center.y << " 偏转角度：" << resultRect.angle << "°" << endl;
+				xzuobiao = resultRect.center.x;
+				yzuobiao = resultRect.center.y;
+				jiaodu = resultRect.angle;
+
+
+			}
+			i++;
+		}
+		++itc;
+	}
+
+	return temp;
+
+}
+
+int main()
+{
+
+
+	int caiyang;
+	printf("请输入采样次数（请输入不小于2的整数）：");
+	scanf_s("%d", &caiyang);
+	printf("请输入采样时间间隔（秒）：");
+	scanf_s("%f", &jiange);
+	printf("请输入采样比例尺(实际尺寸/图上尺寸）：");
+	scanf_s("%f", &bilichi);
+
+
+
+
+	getchar();
+	char lujing[100] = "";
+	printf("请输入照片存储路径：");
+	fgets(lujing, sizeof(lujing), stdin);
+	if (lujing[strlen(lujing) - 1] == '\n')
+		lujing[strlen(lujing) - 1] = '\0';
+
+
+
+
+
+
+
+
+	printf_s("\n");
+	int xunhuan = 0;
+	while (xunhuan < (caiyang - 1))
+	{
+
+		char zhong[16];
+		sprintf_s(zhong, "%d", xunhuan);
+		char wei[20] = ".png";
+		char s[20];
+		//*********************************************************
+		sprintf_s(s, "%s%s%s", lujing, zhong, wei);
+		double xx1, yy1, xx2, yy2;
+		double x1, y1, x2, y2;
+		Mat matSrc = imread(s, 1);
+		Mat middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+		xingxing[xunhuan][0] = (x1 + x2) / 2;
+		xingxing[xunhuan][1] = (y1 + y2) / 2;
+		imshow("原图", matSrc);
+		imshow("red", picture_red(matSrc));
+		double yyi = 0;
+		double xyi = 0;
+		yyi = y2 - y1;
+		xyi = x2 - x1;
+		if (xyi != 0)
+		{
+			fuyangjiao[xunhuan] = atan(yyi / xyi)*(180 / PI);
+		}
+		else
+		{
+			fuyangjiao[xunhuan] = 90;
+		}
+		//这部分是第二张照片自旋的
+		sprintf_s(zhong, "%d", xunhuan + 1);
+		sprintf_s(s, "%s%s%s", lujing, zhong, wei);
+		matSrc = imread(s, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+		xingxing[xunhuan+1][0] = (x1 + x2) / 2;
+		xingxing[xunhuan+1][1] = (y1 + y2) / 2;
+		imshow("原图", matSrc);
+		imshow("red", picture_red(matSrc));
+		double yer = 0;
+		double xer = 0;
+		yer = y2 - y1;
+		xer = x2 - x1;
+		if (xer != 0)
+		{
+			fuyangjiao[xunhuan + 1] = atan(yer / xer)*(180 / PI);
+		}
+		else
+		{
+			fuyangjiao[xunhuan + 1] = 90;
+		}
+
+		zuocha[xunhuan][0] = fabs(xingxing[xunhuan + 1][0] - xingxing[xunhuan][0]);
+		zuocha[xunhuan][1] = fabs(xingxing[xunhuan + 1][1] - xingxing[xunhuan][1]);
+		zuocha[xunhuan][2] = fabs(fuyangjiao[xunhuan + 1] - fuyangjiao[xunhuan]);
+
+
+
+		//*******************************************************
+		
+
+
+
+		printf_s("第%d组重心x方向位移为：%.1fm\n", xunhuan + 1, zuocha[xunhuan][0]);
+		printf_s("第%d组重心y方向位移为：%.1fm\n", xunhuan + 1, zuocha[xunhuan][1]);
+		printf_s("第%d组角度变化为：%.1frad\n", xunhuan + 1, zuocha[xunhuan][2]);
+
+		sudu[xunhuan][0] = zuocha[xunhuan][0] / jiange;
+		sudu[xunhuan][1] = zuocha[xunhuan][1] / jiange;
+		sudu[xunhuan][2] = zuocha[xunhuan][2] / jiange;
+
+		printf_s("第%d组重心x方向速度为：%.1fm/s\n", xunhuan + 1, sudu[xunhuan][0]);
+		printf_s("第%d组重心y方向速度为：%.1fm/s\n", xunhuan + 1, sudu[xunhuan][1]);
+		printf_s("第%d组角速度为：%.1frad/s\n", xunhuan + 1, sudu[xunhuan][2]);
+
+
+		//这部分是自旋的
+		char zixuanzhong[16];
+		sprintf_s(zixuanzhong, "%d", xunhuan);
+		char zixuanwei[20] = "r.png";
+		char zixuans[20];
+		sprintf_s(zixuans, "%s%s%s", lujing, zixuanzhong, zixuanwei);
+		matSrc = imread(zixuans, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+		imshow("原图r", matSrc);
+		imshow("redr", picture_red(matSrc));
+
+		yyi = 0;
+		xyi = 0;
+		yyi = y2 - y1;
+		xyi = x2 - x1;
+		if (xyi != 0)
+		{
+			zixuanjiao1 = atan(yyi / xyi)*(180 / PI);
+		}
+		else
+		{
+			zixuanjiao1 = 90;
+		}
+		//这部分是第二张照片自旋的
+		sprintf_s(zixuanzhong, "%d", xunhuan + 1);
+		sprintf_s(zixuans, "%s%s%s", lujing, zixuanzhong, zixuanwei);
+		matSrc = imread(zixuans, 1);
+		middle = picture_red(matSrc);
+		O_x1y1(middle, &xx1, &yy1, &xx2, &yy2);
+		x1 = xx1;
+		y1 = yy1;
+		x2 = xx2;
+		y2 = yy2;
+		imshow("原图r", matSrc);
+		imshow("redr", picture_red(matSrc));
+
+		yer = 0;
+		xer = 0;
+		yer = y2 - y1;
+		xer = x2 - x1;
+		if (xer != 0)
+		{
+			zixuanjiao2 = atan(yer / xer)*(180 / PI);
+		}
+		else
+		{
+			zixuanjiao2 = 90;
+		}
+		zixuanjiao[xunhuan] = zixuanjiao2 - zixuanjiao1;
+		printf_s("第%d组自旋角度为：%.1f°\n", xunhuan + 1, zixuanjiao[xunhuan]);
+		zixuanjiaosudu[xunhuan] = zixuanjiao[xunhuan] / jiange;
+		printf_s("第%d组自旋角速度为：%.1f°/s\n", xunhuan + 1, zixuanjiaosudu[xunhuan]);
+
+
+
+
+		printf_s("\n");
+		xunhuan = xunhuan + 1;
+	}
+	waitKey(0);
+	system("PAUSE");
+	return 0;
+
+}
+
+
